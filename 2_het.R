@@ -27,7 +27,7 @@ clearUnreliableFood<-function(student){
 }
 
 clearUnreliableBeer<-function(student){
-  student[beer<0|beer>100,height:=NA]
+  student[beer<0|beer>100,beer:=NA]
 }
 
 convertMHeightToCm(student)
