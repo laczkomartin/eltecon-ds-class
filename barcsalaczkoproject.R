@@ -36,7 +36,7 @@ usaccident[,Weather_Condition:=as.factor(Weather_Condition)]
 summary(usaccident)
 
 # we realized that we won't need Start_Time and End_Time in our analysis (1. we don't want to perform time-series analysis
-  # 2. data seems a bit unreliable and we might get confused using them(maximum of End_time is 2020-10-31))
+# 2. data seems a bit unreliable and we might get confused using them(maximum of End_time is 2020-10-31))
 
 usaccident[,c("Start_Time","End_Time"):=NULL]
 
@@ -45,10 +45,10 @@ usaccident[,c("Start_Time","End_Time"):=NULL]
 usaccident[`Wind_Speed(mph)`>302,`Wind_Speed(mph)`:=NA]
 
 # a maximum distance affected is 333.63 miles which seem unbelievable, but we can't rule out this 
-  # observation without any proof
+# observation without any proof
 
 # the highest temperature ever measured in the US is 134 Fahrenheit : 
-  # https://www.livescience.com/30582-highest-hottest-temperature-recorded-us-world.html
+# https://www.livescience.com/30582-highest-hottest-temperature-recorded-us-world.html
 usaccident[`Temperature(F)`>134,`Temperature(F)`:=NA]
 # lowest temperature ever measured in the US was -80 Fahrenheit, so we cannot surely rule out the minimum
 
