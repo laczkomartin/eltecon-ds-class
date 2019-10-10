@@ -1,0 +1,63 @@
+---
+title: "homework_2"
+author: "Laczkó Martin & Barcsa Zoltán"
+date: '2019 10 10 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+
+```
+
+
+```{r pressure, echo=FALSE}
+
+```
+
+# Importing Data and loading packages
+```{r}
+library(data.table)
+library(ggplot2)
+library(magrittr)
+library(rmarkdown)
+crime<-fread("data/crime.csv")
+str(crime)
+
+```
+# Task 1
+
+```{r}
+setorder(crime[SHOOTING=="Y",.N,by=OFFENSE_CODE_GROUP],-N)[1:5]
+```
+
+# Task 2
+
+```{r}
+
+top5offcodegroup<-setorder(crime[SHOOTING=="Y",.N,by=OFFENSE_CODE_GROUP],-N)[1:5][,OFFENSE_CODE_GROUP]
+crime<-crime[SHOOTING=="Y"& OFFENSE_CODE_GROUP %in% top5offcodegroup]
+str(crime)
+
+```
+
+# Task 3
+
+
+```{r}
+library("scales")
+integer_breaks <- function(n = 4, ...) {
+  breaker <- pretty_breaks(n, ...)
+  function(x) {
+     breaks <- breaker(x)
+     breaks[breaks == floor(breaks)]
+  }
+}
+
+ggplot(crime,aes(x=HOUR))+geom_bar()+scale_x_continuous(breaks = c(0,4,8,12,16,20,24)) +facet_wrap(~OFFENSE_CODE_GROUP,ncol=1,scales = "free_y")+labs(title="Number of reported crimes in Boston",subtitle = "By top 5 most common crime groups",y="COUNT")+theme_minimal()+scale_y_continuous(breaks = integer_breaks())
+
+```
