@@ -1,0 +1,104 @@
+---
+title: "Homework 3"
+author: "Barcsa Zoltán & Laczkó Martin"
+date: '2019-10-25 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Packagek, adat beolvasása
+
+Mit fogunk vizsgálni: van-e a napszaknak hatása a balesetek súlyosságának arányára?
+Severity illetve Sunrise_Sunset változókkal  fogunk dolgozni
+Control csoport: Day
+Treatment csoport: Night
+
+```{r}
+library(data.table)
+library(ggplot2)
+library(magrittr)
+library(purrr)
+
+data<-fread("usaccident.csv")
+summary(data)
+data[,c("Distance(km)","State","Timezone","Temperature(C)","Humidity(%)","Pressure(in)",
+        "Visibility(km)","Wind_Direction","Wind_Speed(kph)","Weather_Condition","Crossing"):=NULL]
+data<-data[Sunrise_Sunset!=""]
+data[,Sunrise_Sunset:=as.factor(Sunrise_Sunset)]
+new_data<-data
+
+
+
+```
+
+# Hatásvizsgálat
+
+Ha Severity 0,1,2->nem súlyos; ha severity 3,4->súlyos
+
+```{r}
+new_data$Severity<-ifelse(new_data$Severity>=3,1,0)
+new_data[,max_severity:=1]
+eff_data<-new_data[,.(severity_rate=sum(Severity==1)/sum(max_severity),count=sum(max_severity)),by=Sunrise_Sunset]
+eff_data
+Uplift<-eff_data$severity_rate[1]/eff_data$severity_rate[2]-1
+Uplift
+ggplot(eff_data,aes(x=Sunrise_Sunset,y=severity_rate))+geom_col()
+eff_data %>%
+  copy() %>%
+  .[, var := severity_rate * (1 - severity_rate) / count] %>%
+  .[, CI_lower := severity_rate - (1.96 * sqrt(var))] %>%
+  .[, CI_higher := severity_rate + (1.96 * sqrt(var))] %>%
+  ggplot(aes(x = Sunrise_Sunset, y = severity_rate)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_higher),col="red")
+
+```
+
+# Eredmény magyarázat
+
+Mivel alapvetően elég sok adat áll rendelkezésünkre, ezért nagyon szűk az errorbar (kiemeltük pirossal, különben nem is látszódna)
+Ezért azt mondhatjuk, hogy a mintabeli hatások elég jól megközelítik a valós populáció esetén fennálló hatást.
+A valóságban tehát szerintünk se nem kisebb, se nem nagyobb a hatás. (szignifikánsan)
+
+# Monte Carlo
+
+```{r}
+aggr_data<-new_data[,.(severity_rate=sum(Severity==1)/sum(max_severity),Severity=sum(Severity),count=sum(max_severity)),by=Sunrise_Sunset] %>% 
+  .[,.(severity_rate_mc=rbinom(10000,Severity,severity_rate)/count,N=1:10000),by=.(Sunrise_Sunset)] %>% 
+  dcast(N~Sunrise_Sunset,value.var="severity_rate_mc")
+aggr_data[,uplift:=Night/Day-1]
+head(aggr_data)
+ggplot(aggr_data)+geom_histogram(aes(x=uplift),bins = 80)+
+  geom_vline(aes(xintercept=quantile(aggr_data$uplift,c(0.025))),col="red",lwd=2)+
+  geom_vline(aes(xintercept=quantile(aggr_data$uplift,c(0.975))),col="red",lwd=2)+
+  geom_vline(aes(xintercept=quantile(aggr_data$uplift,c(0.5))),col="blue",lwd=2)
+
+```
+
+Ezt úgy csináltuk, mint órán, de nagyon más eredményt ad, mint az előző vizsgálat. (nem igazán értettük, hogy miért)
+
+Ezért megnéztük boostrapping módszerrel is.
+
+# Bootstrapping
+
+```{r}
+new_data[sample(.N,.N,replace=T)] %>% 
+  .[,.(severity_rate=sum(Severity==1)/sum(max_severity)),by=.(Sunrise_Sunset)]
+uplift<-map_df(1:1000, ~{
+  new_data[sample(.N,.N,replace=T)] %>% 
+    .[,.(N=.x,severity_rate=sum(Severity==1)/sum(max_severity)),by=.(Sunrise_Sunset)]
+})
+uplift<-uplift %>% dcast(N~Sunrise_Sunset,value.var="severity_rate")
+uplift[,uplifts:=Night/Day-1]
+head(uplift)
+ggplot(uplift)+geom_histogram(aes(x=uplifts),bins=50)+
+  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.025))),col="red",lwd=2)+
+  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.975))),col="red",lwd=2)+
+  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.5))),col="blue",lwd=2)
+
+```
+
+A bootstrapping módszerrel kb akkora  upliftet kapunk, mint az első esetben
