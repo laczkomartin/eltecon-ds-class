@@ -1,0 +1,69 @@
+---
+title: "homework_4"
+author: "Barcsa Zoltán & Laczkó Martin"
+date: '2019 11 20 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Packagek, adatok beolvasása
+
+```{r}
+suppressMessages(library(data.table))
+suppressMessages(library(ggplot2))
+suppressMessages(library(magrittr))
+suppressMessages(library(DescTools))
+suppressMessages(library(broom))
+mydata<-fread("sample_usaccident.csv")
+summary(mydata)
+mydata[,Sunrise_Sunset:=factor(Sunrise_Sunset,levels = c("Night","Day"),labels = c(0,1))]
+mydata[,Timezone:=factor(Timezone)]
+
+
+```
+
+### Kérdés: Magyarázzák-e a különböző időjárási körülmények (szélsebesség, hőmérséklet), illetve napszak a baleset súlyosságát?
+
+#### Linear Probability Model (LPM)
+##### Mivel a kimeneti változó bináris, ezért az OLS modellt lineáris valószínűségi modellnek is szokás nevezni.
+
+### Egyváltozós OLS
+
+```{r}
+
+
+
+ggplot(mydata,aes(x=`Wind_Speed(kph)`,y=Severity))+geom_point()+geom_smooth(method = "lm")+theme_minimal()
+cor(mydata$Severity,mydata$`Wind_Speed(kph)`)
+summary(lm(data=mydata,formula = Severity~`Wind_Speed(kph)`))
+mod<-lm(data=mydata,formula = Severity~`Wind_Speed(kph)`)
+df<-augment(mod)
+ggplot(df,aes(x=.fitted,y=.resid))+geom_point()+theme_minimal()
+
+```
+
+### Többváltozós OLS
+
+```{r}
+multiols<-lm(data=mydata,formula=Severity~`Wind_Speed(kph)`+`Temperature(C)`+Sunrise_Sunset+`Wind_Speed(kph)`*Sunrise_Sunset)
+summary(multiols)
+```
+##### Wind_Speed együtthatója szignifikáns, Sunrise_Sunset együtthatója pont nem, hőmérséklet együtthatója nem, az interakciós tag szintén nem. Nagyon alacsony R^2, tehát kevés dolgot ragad meg a modellunk.
+
+##### LPM modell hátrányai: becsült valószínűség [0,1] intervallumon kívül eshet, heteroszkedaszticitás. Ezért logit modellel becsülünk.
+
+# Logit modell
+
+```{r}
+
+mylogit<-glm(Severity~`Wind_Speed(kph)`+`Temperature(C)`+Sunrise_Sunset+`Wind_Speed(kph)`*Sunrise_Sunset,data=mydata,family = "binomial")
+summary(mylogit)
+summary(multiols)$adj.r.squared<=as.numeric(PseudoR2(mylogit))
+
+
+```
+
+##### R^2 alapján a logit több magyarázóerővel bír. (Nagyon minimális a különbség)
