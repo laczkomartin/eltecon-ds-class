@@ -1,0 +1,105 @@
+---
+title: "Homework 5"
+author: "Laczkó Martin & Barcsa Zoltán"
+date: '2019 11 27 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Packagek, adat beolvasása
+
+```{r}
+suppressMessages(library(data.table))
+suppressMessages(library(broom))
+suppressMessages(library(purrr))
+suppressMessages(library(caret))
+suppressMessages(library(magrittr))
+suppressMessages(library(MLmetrics))
+nba<-fread("data/nba.csv")
+```
+
+
+### Modellek
+```{r}
+  
+formula1<-as.formula(SALARY_MILLIONS~AGE+I(AGE^2))
+formula2<-as.formula(SALARY_MILLIONS~AGE+I(AGE^2)+UNDRAFTED+ALLSTAR+WPERGP)
+formula3<-as.formula(SALARY_MILLIONS~SUMRTG+AGE+I(AGE^2)+RPM+UNDRAFTED+`USG%`)
+formula4<-as.formula(SALARY_MILLIONS~NETRTG+`EFG%`+`TS%`+`USG%`+BACKCOURT+AGE+I(AGE^2)+RPM+ALLSTAR)
+```
+
+
+### Train vs. test error
+```{r}
+
+train_proportion<-0.7
+train_index<-sample(1:nrow(nba),floor(nrow(nba)*train_proportion))
+
+nba_train<-nba[train_index,]
+nba_test<-nba[-train_index,]
+
+model1<-lm(formula1,data = nba_train)
+model2<-lm(formula2,data = nba_train)
+model3<-lm(formula3,data = nba_train)
+model4<-lm(formula4,data = nba_train)
+nba_train<-nba_train[,Model1:=predict(model1,newdata = nba_train)] %>% .[,Model2:=predict(model2,newdata = nba_train)] %>% .[,Model3:=predict(model3,newdata = nba_train)] %>% .[,Model4:=predict(model4,newdata=nba_train)]
+
+mse_train1<-MSE(nba_train[,SALARY_MILLIONS],nba_train[,Model1])
+mse_train2<-MSE(nba_train[,SALARY_MILLIONS],nba_train[,Model2])
+mse_train3<-MSE(nba_train[,SALARY_MILLIONS],nba_train[,Model3])
+mse_train4<-MSE(nba_train[,SALARY_MILLIONS],nba_train[,Model4])
+
+rounded_mse_train<-round(c(mse_train1,mse_train2,mse_train3,mse_train4),digits = 2)
+
+nba_test<-nba_test[,Model1:=predict(model1,newdata = nba_test)] %>% .[,Model2:=predict(model2,newdata = nba_test)] %>% .[,Model3:=predict(model3,newdata = nba_test)] %>% .[,Model4:=predict(model4,newdata=nba_test)]
+
+mse_test1<-MSE(nba_test[,SALARY_MILLIONS],nba_test[,Model1])
+mse_test2<-MSE(nba_test[,SALARY_MILLIONS],nba_test[,Model2])
+mse_test3<-MSE(nba_test[,SALARY_MILLIONS],nba_test[,Model3])
+mse_test4<-MSE(nba_test[,SALARY_MILLIONS],nba_test[,Model4])
+
+rounded_mse_test<-round(c(mse_test1,mse_test2,mse_test3,mse_test4),digits = 2)
+
+cbind(c("model1","model2","model3","model4"),"train MSE"=rounded_mse_train,"test MSE"=rounded_mse_test)
+
+```
+
+
+### K-fold cross validation
+
+```{r}
+
+
+train_control<-trainControl(method="cv",number=5) # method: cross validation, number: hany darabra szeded szet az adatod
+
+set.seed(2)
+
+model1cv<-train(formula1,data=nba,trControl=train_control,method="lm")
+model2cv<-train(formula2,data=nba,trControl=train_control,method="lm")
+model3cv<-train(formula3,data=nba,trControl=train_control,method="lm")
+model4cv<-train(formula4,data=nba,trControl=train_control,method="lm")
+
+
+a<-model1cv$results$RMSE
+b<-model2cv$results$RMSE
+c<-model3cv$results$RMSE
+d<-model4cv$results$RMSE
+
+rounded_mse_cv<-round(c(a,b,c,d),digits = 2)
+
+cbind(c("model1","model2","model3","model4"),"CV MSE" = rounded_mse_cv)
+
+```
+
+
+### Összefoglalás
+
+```{r}
+cbind(c("model1","model2","model3","model4"),"train MSE"=rounded_mse_train,"test MSE"=rounded_mse_test,"CV MSE" = rounded_mse_cv)
+```
+
+##### Ezek alapján a harmadik modellt tartjuk a legalkalmasabbnak.
+
