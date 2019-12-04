@@ -1,0 +1,153 @@
+---
+title: "Project"
+author: "Laczkó Martin & Barcsa Zoltán"
+date: '2019 11 20 '
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Packagek beolvasása
+
+```{r}
+suppressMessages(library(data.table))
+suppressMessages(library(ggplot2))
+suppressMessages(library(magrittr))
+suppressMessages(library(broom))
+suppressMessages(library(purrr))
+suppressMessages(library(caret))
+suppressMessages(library(lmtest))
+suppressMessages(library(sandwich))
+```
+
+# Adatok beolvasása
+
+```{r}
+nba1<-fread("data/nba_all_seasons.csv")
+nba2<-fread("data/nba_2017_pie.csv")
+nba3<-fread("data/nba_2017_nba_players_with_salary.csv")
+
+
+nba1<-nba1[,c("age","V1","team_abbreviation","college","draft_round","gp","pts","reb","ast","net_rating","oreb_pct",
+              "dreb_pct","usg_pct","ts_pct","ast_pct"):=NULL] %>% .[season=="2016-17"] %>% .[,season:=NULL]
+names(nba2)[c(13,17)]<-c("astarat","toarat")
+nba2<-nba2[,c("AGE","TEAM","GP","W","L","MIN","astarat","toarat","PACE","PIE"):=NULL]
+nba3<-nba3[,c("V1","Rk","eFG%","TEAM","PIE","PACE"):=NULL]
+merged1<-merge(nba1,nba2,by.x = "player_name",by.y = "PLAYER")
+nba<-merge(merged1,nba3,by.x="player_name",by.y="PLAYER")
+suppressWarnings(nba[,draft_year:=as.numeric(draft_year)])
+suppressWarnings(nba[,draft_number:=as.numeric(draft_number)])
+nba<-nba[!is.na(nba$`3P%`)] %>% .[POSITION!="PF-C"]
+nba[,POSITION:=as.factor(POSITION)]
+all_stars<-c("Kyrie Irving","DeMar DeRozan","LeBron James","Jimmy Butler","Giannis Antetokounmpo","Isaiah Thomas","John Wall","Kevin Love","Carmelo Anthony","Kyle Lowry","Paul George","Kemba Walker","Paul Millsap","Stephen Curry","James Harden","Kevin Durant","Kawhi Leonard","Anthony Davis","Russell Westbrook","Klay Thompson","Draymond Green","DeMarcus Cousins","Marc Gasol","DeAndre Jordan","Gordon Hayward")
+nba[,ALLSTAR:=0] %>% .[player_name%in%all_stars,ALLSTAR:=1]
+high_salary<-as.numeric(quantile(nba$SALARY_MILLIONS,probs = 0.75))
+nba[,HIGHSALARY:=0] %>% .[SALARY_MILLIONS>=as.numeric(high_salary),HIGHSALARY:=1]
+nba[,BACKCOURT:=0] %>% .[POSITION=="PG"|POSITION=="SG",BACKCOURT:=1]
+nba[,SUMRTG:=OFFRTG+DEFRTG]
+nba[,UNDRAFTED:=0] %>% .[is.na(draft_number),UNDRAFTED:=1]
+nba[,WPERGP:=W/GP]
+fwrite(nba,"data/nba.csv")
+
+```
+
+Egyes változók magyarázata:
+
+OFFRTG: the amount of points produced by a player per 100 possessions.
+
+DEFRTG: (Players Steals*Blocks) + Opponents Differential.
+
+EFG%: $$\frac{(FG+0.5*3P)}{FGA}$$ (ha valaki csak 2 pontosat dob, akkor milyen százalékkal kéne azt tennie, hogy az adott játékos mezőnyhatékonyságát érje el).
+
+TS%: $$\frac{PTS}{2*(FGA+(0.44*FTA))}$$
+
+USG%: A metric that estimates the percentage of his team's possessions a player "uses" while he is in the game.
+
+RPM: the player’s average impact in terms of net point differential per 100 offensive and defensive possessions.
+
+### Kutatási kérdés: Statisztikák alapján megalapozottak-e a játékosok a fizetései?
+
+#### Ábrák
+
+```{r}
+ggplot(nba)+geom_histogram(aes(x=`USG%`))+facet_grid(HIGHSALARY~POSITION)+labs(title = "Usage % eloszlása pozíció és magas fizetés függvényében",y="")+scale_y_continuous(breaks = scales::pretty_breaks())
+
+nba$player_name[which(nba$`USG%`>40)] # ki más?
+
+ggplot(nba,aes(x=AGE,y=SALARY_MILLIONS))+geom_point()+geom_smooth(method = "lm",formula = "y~x+I(x^2)",se=F)+geom_jitter(width = 0.3)+scale_x_continuous(breaks = c(19:40))+scale_y_continuous(breaks = c(seq(0,max(nba$SALARY_MILLIONS),2)))+labs(title = "Az életkor és a fizetések kapcsolata",x="Életkor",y="Fizetés (millió $)")
+
+
+ggplot(na.omit(nba),aes(x=draft_number,y=SALARY_MILLIONS))+geom_point()+geom_smooth(method="lm",formula="y~x+I(x^2)+I(x^3)")+labs(x="Hányadik helyen draftolták",y="Fizetés (millió $)")
+
+```
+
+
+#### Hatásvizsgálat Bootstrapping módszerrel
+
+```{r}
+nbaeff<-nba
+nbaeff<-nbaeff[,c("GP","W","HIGHSALARY")]
+set.seed(13)
+nbaeff[sample(.N,.N,replace=T)] %>% 
+  .[,.(WINRATE=sum(W)/sum(GP)),by=.(HIGHSALARY)]
+
+uplift<-map_df(1:10000, ~{
+  nbaeff[sample(.N,.N,replace=T)] %>% 
+    .[,.(N=.x,WINRATE=sum(W)/sum(GP)),by=.(HIGHSALARY)]
+})
+uplift<-uplift %>% dcast(N~HIGHSALARY,value.var="WINRATE")
+setnames(uplift,old = c("N","0","1"),new = c("N","LOW","HIGH"))
+uplift[,uplifts:=HIGH/LOW-1]
+ggplot(uplift)+geom_histogram(aes(x=uplifts),bins=50)+
+  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.025))),col="red",lwd=2)+
+  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.975))),col="red",lwd=2)+
+  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.5))),col="blue",lwd=2)
+
+```
+
+###### Eredmény: szignifikáns hatás (ez azért jó hír.)
+
+#### Statistical Learning
+
+```{r}
+
+nba<-fread("data/nba.csv")
+ggplot(nba,aes(x=RPM,y=SALARY_MILLIONS))+geom_point()+geom_smooth(method = "lm",se=F)
+summary(lm(data=nba,formula = SALARY_MILLIONS~RPM))
+mod<-lm(data=nba,formula = SALARY_MILLIONS~RPM)
+df<-augment(mod)
+ggplot(df,aes(x=.fitted,y=.resid))+geom_point()
+# az ábra alapján heteroszkedaszticitás állhat fenn, ezért robusztus standard hibákat használunk.
+coeftest(lm(SALARY_MILLIONS~RPM,data=nba),vcov. = vcovHC(lm(SALARY_MILLIONS~RPM,data=nba),type = "HC1"))
+
+
+m<-lm(SALARY_MILLIONS~RPM+ALLSTAR+NETRTG+`EFG%`+`TS%`+`USG%`,data=nba)
+coeftest(m,vcov. = vcovHC(m,type = "HC1"))
+
+
+mylogit<-glm(HIGHSALARY~RPM,data=nba,family = "binomial")
+summary(mylogit)
+pred_prob<-predict(mylogit,type="response")
+pred<-data.table(p_high=pred_prob,RPM=nba$RPM)
+ggplot(pred,aes(x=RPM,y=p_high))+geom_point()+ylim(0,1)+geom_hline(yintercept = 0.5,col="red")+scale_x_continuous(breaks = c(-6:8))+labs(x="Real Plus Minus",y="Probability of high salary")
+
+```
+
+
+#### K-means Cluster
+
+
+```{r}
+
+set.seed(2)
+
+nba_cluster<-nba[,c("player_name","SUMRTG","RPM","WPERGP","TS%","USG%")]
+km_output<-kmeans(nba_cluster[,c("TS%","USG%")],centers = 4,nstart = 100)
+ggplot(nba_cluster,aes(x=`USG%`,y=`TS%`))+geom_point(colour=km_output$cluster)
+cluster=km_output$cluster
+
+my_dt<-data.table(nba_cluster,cluster)
+nba[,clustered_best:=0] %>% .[player_name %in%my_dt[cluster==2,][[1]],clustered_best:=1]
+cor(nba$HIGHSALARY,nba$clustered_best)
+```
+
