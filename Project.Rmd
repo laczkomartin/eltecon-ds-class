@@ -1,7 +1,7 @@
 ---
 title: "Project"
-author: "Laczkó Martin & Barcsa Zoltán"
-date: '2019 11 20 '
+author: "Barcsa Zoltán & Laczkó Martin"
+date: '2020-01-08'
 output:
   html_document: default
   pdf_document: default
@@ -16,13 +16,13 @@ suppressMessages(library(magrittr))
 suppressMessages(library(broom))
 suppressMessages(library(purrr))
 suppressMessages(library(caret))
-suppressMessages(library(lmtest))
-suppressMessages(library(sandwich))
 ```
 
-# Adatok beolvasása
+# Adatok beolvasása, formázása
 
 ```{r}
+# https://drive.google.com/drive/u/0/folders/1zLCXNVhgilwVOlbsOeUsPCAVXxH4eY_b
+
 nba1<-fread("data/nba_all_seasons.csv")
 nba2<-fread("data/nba_2017_pie.csv")
 nba3<-fread("data/nba_2017_nba_players_with_salary.csv")
@@ -35,6 +35,7 @@ nba2<-nba2[,c("AGE","TEAM","GP","W","L","MIN","astarat","toarat","PACE","PIE"):=
 nba3<-nba3[,c("V1","Rk","eFG%","TEAM","PIE","PACE"):=NULL]
 merged1<-merge(nba1,nba2,by.x = "player_name",by.y = "PLAYER")
 nba<-merge(merged1,nba3,by.x="player_name",by.y="PLAYER")
+nba<-nba[!duplicated(nba$player_name)]
 suppressWarnings(nba[,draft_year:=as.numeric(draft_year)])
 suppressWarnings(nba[,draft_number:=as.numeric(draft_number)])
 nba<-nba[!is.na(nba$`3P%`)] %>% .[POSITION!="PF-C"]
@@ -47,15 +48,22 @@ nba[,BACKCOURT:=0] %>% .[POSITION=="PG"|POSITION=="SG",BACKCOURT:=1]
 nba[,SUMRTG:=OFFRTG+DEFRTG]
 nba[,UNDRAFTED:=0] %>% .[is.na(draft_number),UNDRAFTED:=1]
 nba[,WPERGP:=W/GP]
+nba<-nba[,c("draft_year","player_height","player_weight","country","AST%","NETRTG","3P","3P%","3PA","2P","2PA","2P%","FT","FTA","FT%","AST/TO","OREB%","DREB%","REB%","MP","ORB","DRB","TRB","AST","STL","BLK","TOV","PF","POINTS","OFFRTG","DEFRTG"):=NULL]
 fwrite(nba,"data/nba.csv")
 
 ```
 
-Egyes változók magyarázata:
+Rövid bemutató: 
+2016-17-es NBA (National Basketball Association) statisztikák segítségével végzünk data exploratory elemzést. Ehhez 3 .csv fájlt használtunk, melyek mind elérhetőek a Google Drive linken keresztül. Kezdetben kitöröltük mindegyik adattáblából a nem szükséges változókat, majd összemergeltük őket 1 fájlba (nba). Ezek után végeztünk pár átalakítást az adattáblánkon, például egyes változók faktorizálásával, vagy új változók létrehozásával. A végső fájl nba.csv néven szintén megtalálható a Google Drive linken keresztül. 
+
+
+### Egyes változók magyarázata:
 
 OFFRTG: the amount of points produced by a player per 100 possessions.
 
 DEFRTG: (Players Steals*Blocks) + Opponents Differential.
+
+(A fenti két változó ki lett törölve, azonban a "SUMRTG" változó megértésehez szükségesek.)
 
 EFG%: $$\frac{(FG+0.5*3P)}{FGA}$$ (ha valaki csak 2 pontosat dob, akkor milyen százalékkal kéne azt tennie, hogy az adott játékos mezőnyhatékonyságát érje el).
 
@@ -65,89 +73,155 @@ USG%: A metric that estimates the percentage of his team's possessions a player 
 
 RPM: the player’s average impact in terms of net point differential per 100 offensive and defensive possessions.
 
-### Kutatási kérdés: Statisztikák alapján megalapozottak-e a játékosok a fizetései?
+Megjegyzés: a játékosok szerződései: általában több éves szerződések, struktúrája: pl.: 5év 70 millió$, tehát az elkövetkező 5 évben 70 millió dollárt kap összesen, azonban nem egyenletesen elosztva (évi 14 millió $), hanem növekvő módon. (Ezt azért fontos megjegyezni, hogy ne legyen félreérthető, mikor arra hivatkozunk, hogy a játékos jelenleg is abban a szerződésben van, mint az elemzés során, azonban jelenlegi éves fizetése magasabb, mint ami az adatsetben látható).
+
+## Kutatás: Data Exploratory Analysis
+
+```{r}
+summary(nba[,c("EFG%","TS%","USG%","AGE","FG%","MPG","ORPM","DRPM","RPM","WINS_RPM","W","SALARY_MILLIONS","SUMRTG","UNDRAFTED","WPERGP")])
+```
+Mit látunk a five number summary outputjából?
+
+-átlagos usage percentage 20%, mely elég logikusnak tűnik, ugyanis egyszerre 5 játékos van a pályán egy csapatban
+
+-5 number summary alapján balra ferde, jobbra nyújtott a játékosok életkorának eloszlása. Szintén elég logikus, ugyanis a játékosok nagy része egyetemről jut be a ligába, és átlagban körülbelül 10-12 évet tölt el a ligában. 
+
+-az összes PLUSMINUS mutató átlaga negatív, ezt furának találtuk
+
+-fizetések eloszlása szintén balra ferde, jobbra nyújtott (átlag: 7.555 millió $ ; maximum: 30.96 millió $) [erről még a későbbiekben lesz részletesebb elemzés]
+
+-a játékosok körülbelül 11.5 százaléka nem a draft sorsolásról jutott be a ligába (korábban más országok top ligáiban játszott vagy miután a drafton keresztül nem jutott be rövid időtartamú szerződést ajánlottak neki)
+
+Ezt követően egyes statisztikák szélsőértékeit is megnéztük, összevetve a játékosok fizetéseivel, és azt viszgáljuk, hogy vannak-e kiugró értékek. (Például bizonyos statisztika alapján top játékos rendkívül alacsony fizetéssel és fordítva)
+
+
+```{r}
+nba[which(nba$RPM %in% head(sort(nba$RPM,decreasing = T),10)),c("player_name","RPM","SALARY_MILLIONS")] %>% .[order(-rank(RPM))]
+
+nba[which(nba$RPM %in% head(sort(nba$RPM,decreasing = F),10)),c("player_name","RPM","SALARY_MILLIONS")] %>% .[order(rank(RPM))]
+```
+
+A legjobb RPM mutatóval rendelkező játékosok közül egyértelműen kiemelkedik Nikola Jokic és Rudy Gobert nevét, akik fizetése jóval elmaradt a liga átlagfizetésétől is. Jelenlegi fizetésük: Nikola Jokic: 25.47 millió $ ; Rudy Gobert: 22.74 millió $.
+
+A legrosszabb RPM mutatóval rendelkező játékosok közül egyedül Brandon Knightnak volt átlag feletti fizetése, azonban jelenlegi fizetése 15.6 millió $. (2015-ben 5év, 70 millió szerződést kötött)
+
+```{r}
+nba[which(nba$WINS_RPM %in% head(sort(nba$WINS_RPM,decreasing = T),10)),c("player_name","WINS_RPM","SALARY_MILLIONS")]%>% .[order(-rank(WINS_RPM))]
+
+nba[which(nba$WINS_RPM %in% head(sort(nba$WINS_RPM,decreasing = F),10)),c("player_name","WINS_RPM","SALARY_MILLIONS")]%>% .[order(rank(WINS_RPM))]
+```
+
+A győzelem esetén elért Real Plus Minus mutató esetén legjobban teljesítők nagyrészt ugyanazok, akiket az előzőekben is láthattunk.
+A legrosszabbul teljesítők között megjelent Brandon Ingram, akit idő közben eltradelt a Los Angeles Lakers New Orleansba, jelenleg is ugyanabban a szerződésben van, idei fizetése körülbelül 7.62 millió $. Átlag feletti fizetéssel rendelkezett továbbá Jordan Clarkson, illetve Aaron Affalo, közülük Affalo már visszavonult, Clarkson jelenleg ugyanabban a szerződésben van, idei fizetése kb. 13.5 millió $.
+
+
+```{r}
+nba[which(nba$`USG%` %in% head(sort(nba$`USG%`,decreasing = T),10)),c("player_name","USG%","SALARY_MILLIONS")]%>% .[order(-rank(`USG%`))]
+```
+Látható, hogy alapvetően a magas fizetésű sztár játékosok usage százaléka a legmagasabb. 2 játékos fizetése van jóval elmaradva a lista többi tagjától.
+Joel Embiid a 2016-17-es szezonban még rookie szerződését töltötte ki,jelenlegi éves fizetése kb. 27.5 millió $.
+Isaiah Thomas a 2016-17-es szezon rájátszásában sérülést szenvedett, melyből nem tudott 100 százalékosan visszatérni, azóta többször csapatot is váltott, jelenlegi fizetése 2.3 millió $.
+
+
+
+```{r}
+nba[which(nba$`TS%` %in% head(sort(nba$`TS%`,decreasing = T),10)),c("player_name","TS%","SALARY_MILLIONS","MPG")]%>% .[order(-rank(`TS%`))]
+
+nba[which(nba$`TS%` %in% head(sort(nba$`TS%`,decreasing = F),10)),c("player_name","TS%","SALARY_MILLIONS","MPG")]%>% .[order(rank(`TS%`))]
+
+nba[which(nba$`EFG%` %in% head(sort(nba$`EFG%`,decreasing = T),10)),c("player_name","EFG%","SALARY_MILLIONS","MPG")]%>% .[order(-rank(`EFG%`))]
+
+nba[which(nba$`EFG%` %in% head(sort(nba$`EFG%`,decreasing = F),10)),c("player_name","EFG%","SALARY_MILLIONS","MPG")]%>% .[order(rank(`EFG%`))]
+
+```
+
+Mind a True Shooting, mind az effective field goal % esetén nagyrészt a cserejátékosok tölltik ki a szélső értékekeket (alacsony MPG statisztika (minutes per game)). Ennek ellenére itt is láthatunk kiemelkedő eredményeket, ilyen például true shooting esetén Kevin Durant vagy a korábban említett Rudy Gobert a pozitív irányba, illetve Justise Winslow a negatív irányba, aki a gyenge statisztika ellenére is majd 35 percet átlagolt a szezonban.
+Effective Field Goal % esetén pozitív irányba Rudy Gobert, Dwight Howard (mindketten centerek), illetve Kyle Korver emelhető ki, negatív irányba pedig itt is Justise Winslow.
 
 #### Ábrák
 
 ```{r}
-ggplot(nba)+geom_histogram(aes(x=`USG%`))+facet_grid(HIGHSALARY~POSITION)+labs(title = "Usage % eloszlása pozíció és magas fizetés függvényében",y="")+scale_y_continuous(breaks = scales::pretty_breaks())
+ggplot(nba)+geom_histogram(aes(x=SALARY_MILLIONS))+facet_wrap(~POSITION)+labs(title="Játékosok fizetéseinek eloszlása pozíció szerint",x="Éves fizetés (millió $)")
+```
 
-nba$player_name[which(nba$`USG%`>40)] # ki más?
+A fizetések pozíció alapú szétbontása esetén nem vártunk számottevő különbséget, mely az ábra alapján beigazolódni látszik. Minden pozíció esetén megfigyelhető a balra csúcsos, jobbra nyújtott eloszlás.
 
+```{r}
+ggplot(na.omit(nba),aes(x=draft_number,y=SALARY_MILLIONS))+geom_point()+geom_smooth(method="lm",se=F,formula="y~x+I(x^2)+I(x^3)")+labs(x="Draft pozíció",y="Fizetés (millió $)")
+```
+
+Látható, hogy alapvetően a kedvező helyen draftolt játékosok fizetései a magasabbak, azonban a rosszabb helyen draftoltak esetén is láthatunk kiemelkedő, 20 millió $ feletti fizetésű játékosokat.
+Megjegyzés: az ábra bal alsó felén látható eloszlás a frissen draftolt játékosok fizetéseit mutatja, ezért ennyire szabályos a pontok eloszlása ebben a részben. (a draftolt játékosok rookie szerződései pontosan meg vannak határozva minden évben)
+
+```{r}
 ggplot(nba,aes(x=AGE,y=SALARY_MILLIONS))+geom_point()+geom_smooth(method = "lm",formula = "y~x+I(x^2)",se=F)+geom_jitter(width = 0.3)+scale_x_continuous(breaks = c(19:40))+scale_y_continuous(breaks = c(seq(0,max(nba$SALARY_MILLIONS),2)))+labs(title = "Az életkor és a fizetések kapcsolata",x="Életkor",y="Fizetés (millió $)")
-
-
-ggplot(na.omit(nba),aes(x=draft_number,y=SALARY_MILLIONS))+geom_point()+geom_smooth(method="lm",formula="y~x+I(x^2)+I(x^3)")+labs(x="Hányadik helyen draftolták",y="Fizetés (millió $)")
-
 ```
 
-
-#### Hatásvizsgálat Bootstrapping módszerrel
+Az ábrán jól látszik, hogy a játékosok fizetései egy bizonyos életkorig nőnek (körülbelül 32 éves korig), majd ezt követően monoton csökkennek. Ez alapvetően a primetime kifejezéssel magyarázható, azaz hogy a játékosok mikor élik a fénykorukat a ligában. Fontos megjegyzeni azonban, hogy ez az életkor nem 32 évnél van, hanem korábban, viszont a fénykorukban lévő játékosok több éves fizetési szerződésük ebben az életkorban érik el a maximumot. Az is jól látszik továbbá, hogy 22 éves korig a játékosok fizetése jóval homogénebb, ennek oka a már korábban említett rookie szerződés.
 
 ```{r}
-nbaeff<-nba
-nbaeff<-nbaeff[,c("GP","W","HIGHSALARY")]
-set.seed(13)
-nbaeff[sample(.N,.N,replace=T)] %>% 
-  .[,.(WINRATE=sum(W)/sum(GP)),by=.(HIGHSALARY)]
+nba[is.na(draft_number), draft_number:=100] 
+nba$draft_numbercat<-cut(nba$draft_number,breaks = c(0,14,30,60,Inf), labels = c("lottery pick","middle class","second round","undrafted"))
 
-uplift<-map_df(1:10000, ~{
-  nbaeff[sample(.N,.N,replace=T)] %>% 
-    .[,.(N=.x,WINRATE=sum(W)/sum(GP)),by=.(HIGHSALARY)]
-})
-uplift<-uplift %>% dcast(N~HIGHSALARY,value.var="WINRATE")
-setnames(uplift,old = c("N","0","1"),new = c("N","LOW","HIGH"))
-uplift[,uplifts:=HIGH/LOW-1]
-ggplot(uplift)+geom_histogram(aes(x=uplifts),bins=50)+
-  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.025))),col="red",lwd=2)+
-  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.975))),col="red",lwd=2)+
-  geom_vline(aes(xintercept=quantile(uplift$uplifts,c(0.5))),col="blue",lwd=2)
-
+ggplot(nba, aes(x=RPM))+geom_histogram()+facet_wrap(~draft_numbercat)+labs(title = "Real Plus Minus eloszlása a draft csoport szerint")+scale_y_continuous(breaks = scales::pretty_breaks())
 ```
 
-###### Eredmény: szignifikáns hatás (ez azért jó hír.)
-
-#### Statistical Learning
-
-```{r}
-
-nba<-fread("data/nba.csv")
-ggplot(nba,aes(x=RPM,y=SALARY_MILLIONS))+geom_point()+geom_smooth(method = "lm",se=F)
-summary(lm(data=nba,formula = SALARY_MILLIONS~RPM))
-mod<-lm(data=nba,formula = SALARY_MILLIONS~RPM)
-df<-augment(mod)
-ggplot(df,aes(x=.fitted,y=.resid))+geom_point()
-# az ábra alapján heteroszkedaszticitás állhat fenn, ezért robusztus standard hibákat használunk.
-coeftest(lm(SALARY_MILLIONS~RPM,data=nba),vcov. = vcovHC(lm(SALARY_MILLIONS~RPM,data=nba),type = "HC1"))
+Legjobban talán a le nem draftolt játékosoknál látszik, hogy a lottery pickekhez képest mennyivel balra van tolódva a Real Plus Minus eloszlása, ebben a kategóriában alig van olyan egyén, aki pozitív statisztikával rendelkezik. 
 
 
-m<-lm(SALARY_MILLIONS~RPM+ALLSTAR+NETRTG+`EFG%`+`TS%`+`USG%`,data=nba)
-coeftest(m,vcov. = vcovHC(m,type = "HC1"))
-
-
-mylogit<-glm(HIGHSALARY~RPM,data=nba,family = "binomial")
-summary(mylogit)
-pred_prob<-predict(mylogit,type="response")
-pred<-data.table(p_high=pred_prob,RPM=nba$RPM)
-ggplot(pred,aes(x=RPM,y=p_high))+geom_point()+ylim(0,1)+geom_hline(yintercept = 0.5,col="red")+scale_x_continuous(breaks = c(-6:8))+labs(x="Real Plus Minus",y="Probability of high salary")
-
-```
-
-
-#### K-means Cluster
+### Principal Component Analysis
 
 
 ```{r}
-
-set.seed(2)
-
-nba_cluster<-nba[,c("player_name","SUMRTG","RPM","WPERGP","TS%","USG%")]
-km_output<-kmeans(nba_cluster[,c("TS%","USG%")],centers = 4,nstart = 100)
-ggplot(nba_cluster,aes(x=`USG%`,y=`TS%`))+geom_point(colour=km_output$cluster)
-cluster=km_output$cluster
-
-my_dt<-data.table(nba_cluster,cluster)
-nba[,clustered_best:=0] %>% .[player_name %in%my_dt[cluster==2,][[1]],clustered_best:=1]
-cor(nba$HIGHSALARY,nba$clustered_best)
+nba_pcaclust<-nba[,c("player_name","TS%","AGE","RPM","WINS_RPM","SALARY_MILLIONS","ALLSTAR","SUMRTG","draft_numbercat","HIGHSALARY")]
+nba_pcaclust[,draft_numbercat:=as.numeric(draft_numbercat)]
+pca_output <- prcomp(nba_pcaclust[,-c("player_name","HIGHSALARY")],scale = TRUE)
+cbind(as.matrix(pca_output$center),as.matrix(pca_output$scale))
 ```
 
+Ezt követően bizonyos változók segítségével Principal Component Analysist végeztünk. Az táblázatban az output átlagai illetve szórásai láthatók. 
+
+```{r}
+biplot(pca_output, scale = 0)
+nba_pcaclust[c(3,72,146,186),]
+```
+Majd egy biploton megjelenítettük, hogy az első két principal component melyik változót milyen hangsúllyal veszi, majd a szemre kiemelkedő egyének sorszámát véve megnéztük, hogy pontosan melyik játékosokról van szó, és ők milyen statisztikákkal rendelkeznek.
+Lebron James, aki a legmagasabb fizetéssel rendelkező játékos, illetve kiemelkedő RPM mutatóval rendelkezett, valamint all star játékos, így nem véletlen, hogy az ábra jobb oldalán helyezkedik el kiemelkedően.
+Aaron Harrison illetve John Lucas III, akik gyenge statisztikákkal rendelkeznek, továbbá le nem draftolt játékosok. 
+valamint Demetrius Jackson, aki  TS% illetve SUMRTG statisztikája miatt emelkedik ki a mezőnyből.
+
+### K-means Cluster
+
+```{r}
+set.seed(5)
+
+km_output<-kmeans(nba_pcaclust[,-c("player_name","HIGHSALARY","SALARY_MILLIONS")],centers = 4,nstart = 100)
+ggplot(nba_pcaclust,aes(x=RPM,y=`TS%`))+geom_point(colour=km_output$cluster)
+cluster<-km_output$cluster
+my_dt<-data.table(nba_pcaclust,cluster)
+my_dt[,clustered_best:=0] %>% .[player_name %in%my_dt[cluster==2,][[1]],clustered_best:=1]
+```
+
+Ezt követően K-means klaszterezést végeztünk, ahol 4 csoportba akartuk osztani a játékosokat, hogy később össze tudjuk vetni a klaszterezés alapján legjobbnak titulált játékosokat az általunk magas fizetésűnek titulált játékosokkal. (Magas fizetésű az a játékos, aki a felső negyedben helyezkedik el az éves fizetéseket tekintve.)
+Az összes változót figyelembe véve természetesen nem tudtunk ábrázolni, így a Real Plus Minus, illetve a True Shooting % függvényében ábrázoltuk. Az általunk legjobbnak vélt játékosok a piros színnel jelölt klaszterba tartoznak.
+
+```{r}
+a<-sum(my_dt$HIGHSALARY==1&my_dt$clustered_best==1)
+b<-sum(my_dt$HIGHSALARY==0&my_dt$clustered_best==1)
+c<-sum(my_dt$HIGHSALARY==1&my_dt$clustered_best==0)
+d<-sum(my_dt$HIGHSALARY==0&my_dt$clustered_best==0)
+clustmat<-matrix(data = c(a,b,c,d),nrow = 2,ncol = 2)
+rownames(clustmat)<-c("HIGHSAL1","HIGHSAL0")
+colnames(clustmat)<-c("clustbest1","clustbest0")
+clustmat
+```
+
+Érdekes eredményre jutottunk. Az elemzésünk alapján a magas fizetésű játékosok kevesebb, mint fele tartozik a legjobb statisztikákkal rendelkező klaszterba, valamint 28 olyan játékos van, akik a legjobb klaszterba tartoznak, azonban nem magas a fizetésük.
+
+A legjobb klaszterba tartozó, magas fizetéssel rendelkező játékosok nevei és a klaszteranalízis során használt statisztikáik a következők:
+
+(draft_numbercat változót szívesen bent hagytuk volna, de új sorba teszi annak ellnére, hogy lenne még helye)
+
+```{r}
+my_dt[HIGHSALARY==1 & clustered_best==1,-c("SALARY_MILLIONS","HIGHSALARY","cluster","clustered_best","draft_numbercat")]
+```
