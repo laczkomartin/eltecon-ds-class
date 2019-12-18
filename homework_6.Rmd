@@ -1,0 +1,62 @@
+---
+title: "Homework 6"
+author: "Laczkó Martin & Barcsa Zoltán"
+date: '2019 12 18 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packagek, adat beolvasása
+
+```{r}
+suppressMessages(library(data.table))
+suppressMessages(library(ggplot2))
+sales_data <- fread("data/sales_data_for_clustering.csv")
+```
+
+# Principal Component Analysis
+
+```{r}
+pca_output <- prcomp(sales_data[,c(4,5)], scale = TRUE)
+
+pca_output$center
+pca_output$scale
+pca_output$rotation
+
+biplot(pca_output, scale = 0)
+```
+
+
+
+# K-means clustering
+
+
+```{r}
+km_output <- kmeans(sales_data[,c(4,5)], centers = 2, nstart = 20)
+head(km_output$cluster)
+ggplot(sales_data, aes(x = quantity, y = price)) + geom_point(colour = (km_output$cluster + 1))
+
+
+k <- 1:5
+tot_within_ss <- sapply(k, function(n) {
+    km_output <- kmeans(sales_data[,c(4,5)], n, nstart = 20)
+    km_output$tot.withinss
+})
+tot_within_ss
+
+plot(
+    x = k,
+    y = tot_within_ss,
+    type = "b",
+)
+
+
+km_output <- kmeans(sales_data[,c(4,5)], centers = 3, nstart = 20)
+ggplot(sales_data, aes(x = quantity, y = price)) + geom_point(colour = (km_output$cluster + 1))
+```
+
+
+
